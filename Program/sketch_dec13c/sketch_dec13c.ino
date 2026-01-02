@@ -1,12 +1,12 @@
-// OLED Libraries
+// OLED libraries
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// Load Cell Library
+// load cell library
 #include "HX711.h"
 
-// ===== OLED CONFIG =====
+// OLED config
 constexpr int SCREEN_WIDTH  = 128;
 constexpr int SCREEN_HEIGHT = 64;
 constexpr int OLED_SDA = 21;
@@ -15,41 +15,42 @@ constexpr uint8_t OLED_ADDRESS = 0x3C;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// ===== HX711 PINS =====
-// Note: DAT/DOUT is output from HX711 to ESP32, CLK/SCK is clock from ESP32 to HX711
+// HX711 config
+// DAT/DOUT is output from HX711 to ESP32, CLK/SCK is clock from ESP32 to HX711
 constexpr int HX711_DAT = 19;
 constexpr int HX711_CLK = 18;
 
 HX711 scale;
 
-// ===== UI PINS =====
-constexpr int ZERO_BUTTON_PIN = 27;  // ESP32 does NOT have GPIO24
-constexpr int BUZZER_PIN      = 25;
+// UI pins
+constexpr int ZERO_BUTTON_PIN = 27;
+constexpr int MODE_PIN = 26;
+constexpr int BUZZER_PIN = 25;
 
+// calibration constant via manual tuning w/known weight
+const float calFactor = 748;
 
-// ===== SIMPLE BEEP HELPER =====
-void beep(int ms = 80) {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(ms);
-  digitalWrite(BUZZER_PIN, LOW);
-}
+// -------------------------
+//    Function Prototypes
+// -------------------------
 
-// Calibration constant
-const float calFactor = 1000; // work on getting this tuned
+void beep(int); // buzzer beep
+void quantize(float); // quantize values to nearest 0.1 g
+void hysteresis(float); // restrict screen updates if change is too small
 
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  // Initialize Pins
+  // init UI pins
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(ZERO_BUTTON_PIN, INPUT_PULLUP);
-  
+  pinMode(MODE_PIN, INPUT_PULLUP);
 
-  // Start I2C
+  // start I2C
   Wire.begin(OLED_SDA, OLED_SCL);
 
-  // Init OLED
+  // init OLED
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
     Serial.println("SSD1306 init failed");
     while (true) { delay(1000); }
@@ -66,7 +67,7 @@ void setup() {
   // Startup screen
   display.setTextSize(2);
   display.setCursor(0, 0);
-  display.println("Scale 1");
+  display.println("Scale (1)");
   display.display();
   beep(120);
   delay(800);
@@ -104,29 +105,56 @@ void loop() {
     }
   }
 
-  long raw = 0;
   long val = 0;
+  float grams = 0.0f;
+  static float gFilt = 0;
+
   if (scale.is_ready()) {
-    raw = scale.read();
     val = scale.get_value();
+    grams = scale.get_units(1);
   }
+
+  gFilt = 0.5f*gFilt + 0.5f*grams;
 
   // Update OLED
   display.clearDisplay();
 
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("Raw:");
+  display.print("Raw:");
 
-  display.setTextSize(2);
-  display.setCursor(0, 16);
-  display.println(raw);
+  // display.setTextSize(1);
+  // display.setCursor(0, 16);
+  // display.print(raw);
 
   display.setTextSize(1);
-  display.setCursor(0, 48);
-  display.println(val);
+  display.setCursor(0, 16);
+  display.print(val);
+
+  display.setTextSize(2);
+  display.setCursor(45, 16);
+  display.print(grams,1);
+  display.println(" g");
+
+  display.setTextSize(2);
+  display.setCursor(0, 40);
+  display.print(gFilt,1);
 
   display.display();
 
-  delay(100);
+  delay(70);
 }
+
+// ---------------
+//    Functions
+// ---------------
+
+// beep
+void beep(int ms = 15) {
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(ms);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void quantize(float); // quantize values to nearest 0.1 g
+void hysteresis(float); // restrict screen updates if change is too small
