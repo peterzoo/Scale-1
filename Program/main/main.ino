@@ -28,7 +28,7 @@ constexpr int MODE_PIN = 26;
 constexpr int BUZZER_PIN = 25;
 
 // calibration constant via manual tuning w/known weight
-const float calFactor = 748;
+const float calFactor = 734;
 
 // -------------------------
 //    function prototypes
