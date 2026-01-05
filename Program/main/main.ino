@@ -45,6 +45,12 @@ float emaSma = 0.95;
 float threshold = 0.08;
 float sma = 3;
 float zClamp = 0.08;
+float timerStartG = 5.0f;
+
+// timer
+bool timer = false;
+unsigned long tStart = 0;
+unsigned long tElapsed = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -103,6 +109,10 @@ void loop() {
   float grams = 0.0f;
   static float gFilt = 0;
 
+  // timer variables
+  static bool running = false; // state of timer, running or not
+  static float time = 0;
+
   // Button is INPUT_PULLUP => pressed = LOW
   if (digitalRead(ZERO_BUTTON_PIN) == LOW) {
     // Basic debounce
@@ -110,6 +120,8 @@ void loop() {
     if (digitalRead(ZERO_BUTTON_PIN) == LOW) {
       scale.tare();
       gFilt = 0;
+      running = false;
+      time = 0;
       beep(150);
 
       // Wait for release so it doesn't spam tare
@@ -145,6 +157,16 @@ void loop() {
   gFilt = zeroClamp (gFilt);
   gFilt = quantize(gFilt); // quantize to fixed steps
 
+  // timer
+  if (gFilt > timerStartG && running == false) {
+    running = true;
+    tStart = millis();
+  }
+
+  if (running == true) {
+    time = (millis() - tStart)/1000.0f;
+  }
+
   // Update OLED
   display.clearDisplay();
 
@@ -152,21 +174,21 @@ void loop() {
   display.setCursor(0, 0);
   display.print("Raw:");
 
-  // display.setTextSize(1);
-  // display.setCursor(0, 16);
-  // display.print(raw);
-
   display.setTextSize(1);
   display.setCursor(0, 16);
   display.print(val);
 
   display.setTextSize(2);
-  display.setCursor(45, 16);
+  display.setCursor(55, 16);
   display.print(grams,2);
 
   display.setTextSize(2);
   display.setCursor(0, 40);
   display.print(gFilt,1);
+
+  display.setTextSize(2);
+  display.setCursor(55,40);
+  display.print(time,1);
 
   display.display();
 
