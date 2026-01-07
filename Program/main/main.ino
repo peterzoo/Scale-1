@@ -23,9 +23,9 @@ constexpr int HX711_CLK = 18;
 HX711 scale;
 
 // UI pins
-constexpr int ZERO_BUTTON_PIN = 27;
-constexpr int MODE_PIN = 26;
-constexpr int BUZZER_PIN = 25;
+constexpr int zeroButtonPin = 27;
+constexpr int modeButtonPin = 26;
+constexpr int buzzerPin = 25;
 
 // calibration constant via manual tuning w/known weight
 const float calFactor = 734;
@@ -59,14 +59,27 @@ unsigned long flowStopTimer = 0; // ms tracker to stop flow
 const unsigned long refresh = 30; // ms between executing loop
 const unsigned long debounce = 25; // ms for debounce
 
+// ------------- FSM --------------
+enum Mode {
+  MODE_KITCHEN, // 0: weight only
+  MODE_SHOT,    // 1: weight + auto start-stop timer
+  MODE_POUR,    // 2: weight + cts timer
+  MODE_MANUAL,  // 3: weight + manual press timer
+  MODE_SLEEP,   // 4: low power "off"
+  MODE_COUNT    // 5: counts total number of modes for cycling
+};
+
+static Mode mode = MODE_KITCHEN;
+// --------------------------------
+
 void setup() {
   Serial.begin(115200);
   delay(200);
 
   // init UI pins
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(ZERO_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(MODE_PIN, INPUT_PULLUP);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(zeroButtonPin, INPUT_PULLUP);
+  pinMode(modeButtonPin, INPUT_PULLUP);
 
   // start I2C
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -111,6 +124,22 @@ void setup() {
 }
 
 void loop() {
+  // -------------- FSM ---------------
+  static bool lastModeButton = HIGH;
+
+  bool modeButton = digitalRead(modeButtonPin;);
+
+  if (lastModeButton == HIGH && modeButton == LOW) { //calm luh edge detector for quick taps
+    // cycle modes
+    mode = (Mode)((mode+1) % MODE_COUNT);
+
+    beep(100);
+  }
+
+  lastModeButton = modeButton;
+
+  //--------------- FSM --------------
+  
   // define weigh variables
   long val = 0;
   float grams = 0.0f;
@@ -133,7 +162,7 @@ void loop() {
       lastTime = nowTime;
     
     // millis based zero block: input pullup, pressed = low
-    if (digitalRead(ZERO_BUTTON_PIN) == LOW) {
+    if (digitalRead(zeroButtonPin) == LOW) {
       if(nowTime - lastZero > debounce) {
         lastZero = nowTime;
 
@@ -236,9 +265,9 @@ void loop() {
 
 // beep
 void beep(int ms = 15) {
-  digitalWrite(BUZZER_PIN, HIGH);
+  digitalWrite(buzzerPin, HIGH);
   delay(ms);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(buzzerPin, LOW);
 }
 
 // quantize values to nearest 0.1 g
