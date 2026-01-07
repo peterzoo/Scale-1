@@ -37,7 +37,8 @@ const float calFactor = 734;
 void beep(int); // buzzer beep
 float quantize(float g); // quantize values to nearest 0.1 g
 float hysteresis(float read_g); // restrict screen updates if change is too small
-float varZeroClamp(float g);
+float varZeroClamp(float g); // clamp values close to 0
+void tare(); // tare scale
 
 // tuning knobs
 const float emaBig = 0.4; // ema for large changes
@@ -127,7 +128,7 @@ void loop() {
   // -------------- FSM ---------------
   static bool lastModeButton = HIGH;
 
-  bool modeButton = digitalRead(modeButtonPin;);
+  bool modeButton = digitalRead(modeButtonPin);
 
   if (lastModeButton == HIGH && modeButton == LOW) { //calm luh edge detector for quick taps
     // cycle modes
@@ -155,27 +156,11 @@ void loop() {
   static unsigned long lastTime = 0;
   unsigned long nowTime = millis();
 
-  // millis based debounce
-  static unsigned long lastZero = 0;
-  
   if (nowTime - lastTime >= refresh) {
       lastTime = nowTime;
     
-    // millis based zero block: input pullup, pressed = low
-    if (digitalRead(zeroButtonPin) == LOW) {
-      if(nowTime - lastZero > debounce) {
-        lastZero = nowTime;
-
-        // reset everything
-        scale.tare();
-        gFilt = 0;
-        running = false;
-        time = 0;
-        flowStopTimer = 0;
-        startOnce = true;
-        beep(100);
-      }
-    }
+    // millis based zero function
+    tare(nowTime);
 
     if (scale.is_ready()) {
       val = scale.get_value(1);
@@ -285,9 +270,33 @@ float hysteresis(float read_g) {
 }
 
 // locks values close enough to 0.0 to display 0.0 for UX
-float varZeroClamp(float g){
+float varZeroClamp(float g) {
   if (g < 0 && fabsf(g) < zClampNeg) return 0.0f;
   if (g > 0 && fabsf(g) < zClampPos) return 0.0f;
 
   return g;
+}
+
+void tare(unsigned long nowTime) {
+  static unsigned long lastZero = 0;
+  static bool lastState = HIGH;
+
+  bool state = digitalRead(zeroButtonPin);
+
+  if (lastState == HIGH && state == LOW) {
+    if (nowTime - lastZero > debounce) {
+      lastZero = nowTime;
+
+      // reset everything
+      scale.tare();
+      gFilt = 0;
+      running = false;
+      time = 0;
+      flowStopTimer = 0;
+      startOnce = true;
+      beep(100);
+    }
+  }
+
+  lastState = state;
 }
