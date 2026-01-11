@@ -38,7 +38,7 @@ void beep(int); // buzzer beep
 float quantize(float g); // quantize values to nearest 0.1 g
 float hysteresis(float read_g); // restrict screen updates if change is too small
 float varZeroClamp(float g); // clamp values close to 0
-void tare(); // tare scale
+void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flowStopTimer, float &time, bool &startOnce); // tare scale
 
 // tuning knobs
 const float emaBig = 0.4; // ema for large changes
@@ -64,9 +64,9 @@ const unsigned long debounce = 25; // ms for debounce
 enum Mode {
   MODE_KITCHEN, // 0: weight only
   MODE_SHOT,    // 1: weight + auto start-stop timer
-  MODE_POUR,    // 2: weight + cts timer
-  MODE_MANUAL,  // 3: weight + manual press timer
-  MODE_SLEEP,   // 4: low power "off"
+  // MODE_POUR,    // 2: weight + cts timer
+  // MODE_MANUAL,  // 3: weight + manual press timer
+  // MODE_SLEEP,   // 4: low power "off"
   MODE_COUNT    // 5: counts total number of modes for cycling
 };
 
@@ -125,22 +125,6 @@ void setup() {
 }
 
 void loop() {
-  // -------------- FSM ---------------
-  static bool lastModeButton = HIGH;
-
-  bool modeButton = digitalRead(modeButtonPin);
-
-  if (lastModeButton == HIGH && modeButton == LOW) { //calm luh edge detector for quick taps
-    // cycle modes
-    mode = (Mode)((mode+1) % MODE_COUNT);
-
-    beep(100);
-  }
-
-  lastModeButton = modeButton;
-
-  //--------------- FSM --------------
-  
   // define weigh variables
   long val = 0;
   float grams = 0.0f;
@@ -156,18 +140,37 @@ void loop() {
   static unsigned long lastTime = 0;
   unsigned long nowTime = millis();
 
+  // -------------- FSM ---------------
+  static bool lastModeButton = HIGH;
+
+  bool modeButton = digitalRead(modeButtonPin);
+  static unsigned long lastModePress = 0;
+  if (lastModeButton == HIGH && modeButton == LOW) {
+    if (nowTime - lastModePress > debounce) { // debounce
+      lastModePress = nowTime;
+
+    // cycle modes
+      mode = (Mode)((mode+1) % MODE_COUNT);
+      beep(100);
+    }
+  }
+
+  lastModeButton = modeButton;
+
+  //--------------- FSM end-------------
+
   if (nowTime - lastTime >= refresh) {
       lastTime = nowTime;
     
     // millis based zero function
-    tare(nowTime);
+    tare(nowTime, gFilt, running, flowStopTimer, time, startOnce);
 
     if (scale.is_ready()) {
       val = scale.get_value(1);
       grams = scale.get_units(sma);
     }
 
-    // raw reading processing
+    // --------- raw reading processing -------------
 
     // adaptive EMA
     float err = fabsf(grams - gFilt);
@@ -183,62 +186,90 @@ void loop() {
 
       gFilt = ema * gFilt + (1.0f - ema) * grams;
     }
-
+    
     gFilt = hysteresis(gFilt); // Controls when UI can change to ignore noise
     gFilt = varZeroClamp (gFilt);
     gFilt = quantize(gFilt); // quantize to fixed steps
-    
-    if (running == true) {
-      float deltaG = gFilt - prevGFilt; // change in weight
 
-      if (deltaG < minFlowG) { // flow stopped, weight barely changing
-        if (flowStopTimer == 0) {
-          flowStopTimer = millis(); // start counting flow stopped time
-        } else if (millis() - flowStopTimer > minFlowT){ // if flow stop timer is running
-          running = false;
+    switch (mode) {
+      case MODE_KITCHEN:
+        // disable timer, weight only
+        running = false;
+        time = 0.0f;
+        startOnce = true;
+        flowStopTimer = 0;
+        break;
+
+      case MODE_SHOT:
+        // auto-stop shot timer enabled
+        if (running == false && startOnce == true && gFilt > timerStartG)
+        {
+          running = true;
+          tStart = nowTime;
+          time = 0.0f;
           startOnce = false;
           flowStopTimer = 0;
         }
-      } else {
-          flowStopTimer = 0;
+
+        // auto stop checker
+        if (running == true) {
+          float deltaG = gFilt - prevGFilt; // change in weight
+
+          if (fabsf(deltaG) < minFlowG) { // flow stopped, weight barely changing
+            if (flowStopTimer == 0) {
+              flowStopTimer = nowTime; // start counting flow stopped time
+            } else if (nowTime - flowStopTimer > minFlowT){ // if flow stop timer is running
+              running = false;
+              startOnce = false;
+              flowStopTimer = 0;
+            }
+          } else {
+              flowStopTimer = 0;
+          }
+        }
+
+        if (running == true) {
+          time = (nowTime - tStart)/1000.0f;
+        }
+      
+      // re-arm timer if cup is removed
+      if (!running && gFilt < 1.0f) {
+        startOnce = true;
       }
+      break;
     }
-    
+
     prevGFilt = gFilt;
-
-    // timer
-    if (gFilt > timerStartG && running == false) {
-      running = true;
-      tStart = millis();
-      flowStopTimer = 0;
-    }
-
-    if (running == true && startOnce == true) {
-      time = (millis() - tStart)/1000.0f;
-    }
 
     // Update OLED
     display.clearDisplay();
 
+    // display mode
     display.setTextSize(1);
     display.setCursor(0, 0);
-    display.print("Raw:");
+    display.print("Mode:");
+    if (mode == MODE_KITCHEN) display.print("KITCHEN");
+    else if (mode == MODE_SHOT) display.print("SHOT");
 
+    // raw value
     display.setTextSize(1);
     display.setCursor(0, 16);
     display.print(val);
 
+    // raw grams
     display.setTextSize(2);
     display.setCursor(55, 16);
     display.print(grams,2);
 
+    // filtered grams
     display.setTextSize(2);
     display.setCursor(0, 40);
     display.print(gFilt,1);
 
+    // time
     display.setTextSize(2);
     display.setCursor(55,40);
-    display.print(time,1);
+    if (mode == MODE_SHOT) display.print(time,1);
 
     display.display();
   }
@@ -277,7 +308,7 @@ float varZeroClamp(float g) {
   return g;
 }
 
-void tare(unsigned long nowTime) {
+void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flowStopTimer, float &time, bool &startOnce) {
   static unsigned long lastZero = 0;
   static bool lastState = HIGH;
 
