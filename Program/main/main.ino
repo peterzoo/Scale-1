@@ -64,7 +64,7 @@ const unsigned long debounce = 25; // ms for debounce
 enum Mode {
   MODE_KITCHEN, // 0: weight only
   MODE_SHOT,    // 1: weight + auto start-stop timer
-  // MODE_POUR,    // 2: weight + cts timer
+  MODE_POUR,    // 2: weight + cts timer
   // MODE_MANUAL,  // 3: weight + manual press timer
   // MODE_SLEEP,   // 4: low power "off"
   MODE_COUNT    // 5: counts total number of modes for cycling
@@ -190,7 +190,9 @@ void loop() {
     gFilt = hysteresis(gFilt); // Controls when UI can change to ignore noise
     gFilt = varZeroClamp (gFilt);
     gFilt = quantize(gFilt); // quantize to fixed steps
+    float oz = gFilt / 28.3495;
 
+    // fsm non-blocking mode switching
     switch (mode) {
       case MODE_KITCHEN:
         // disable timer, weight only
@@ -228,19 +230,34 @@ void loop() {
           }
         }
 
+        // display time calculator
         if (running == true) {
           time = (nowTime - tStart)/1000.0f;
         }
       
-      // re-arm timer if cup is removed
-      if (!running && gFilt < 1.0f) {
-        startOnce = true;
-      }
-      break;
+        // re-arm timer if cup is removed
+        if (!running && gFilt < 1.0f) {
+          startOnce = true;
+        }
+        break;
+
+      case MODE_POUR:
+        // auto-stop shot timer enabled
+        if (running == false && startOnce == true && gFilt > timerStartG)
+        {
+          running = true;
+          tStart = nowTime;
+          time = 0.0f;
+          startOnce = false;
+          flowStopTimer = 0;
+        }
+
+        if (running == true) {
+        time = (nowTime - tStart)/1000.0f;
+        }
     }
 
     prevGFilt = gFilt;
-
     // Update OLED
     display.clearDisplay();
 
@@ -248,8 +265,9 @@ void loop() {
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.print("Mode:");
-    if (mode == MODE_KITCHEN) display.print("KITCHEN");
-    else if (mode == MODE_SHOT) display.print("SHOT");
+    if (mode == MODE_KITCHEN) display.print("kitchen");
+    else if (mode == MODE_SHOT) display.print("espresso shot");
+    else if(mode == MODE_POUR) display.print ("pourover");
 
     // raw value
     display.setTextSize(1);
@@ -270,7 +288,8 @@ void loop() {
     display.setTextSize(2);
     display.setCursor(55,40);
     if (mode == MODE_SHOT) display.print(time,1);
-
+    if (mode == MODE_KITCHEN) display.print(oz, 1);
+    if (mode == MODE_POUR) display.print(time,1);
     display.display();
   }
 }
