@@ -6,6 +6,9 @@
 // load cell library
 #include "HX711.h"
 
+// wifi library
+#include <WiFi.h>
+
 // OLED config
 constexpr int SCREEN_WIDTH = 128;
 constexpr int SCREEN_HEIGHT = 64;
@@ -51,7 +54,8 @@ unsigned long tStart = 0;         // ms since boot
 unsigned long flowStopTimer = 0;  // ms tracker to stop flow
 
 // millis based timing
-const unsigned long refresh = 30;   // ms between executing loop
+const unsigned long refreshAwake = 30; // ms between executing loop
+const unsigned long refreshSleep = 200; // longer ms between executing loop while asleep to save power
 const unsigned long debounce = 25;  // ms for debounce
 
 // function prototypes
@@ -60,6 +64,8 @@ float quantize(float g);                                                        
 float hysteresis(float read_g);                                                                                             // restrict screen updates if change is too small
 float varZeroClamp(float g);                                                                                                // clamp values close to 0
 void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flowStopTimer, float &time, bool &startOnce);  // tare scale
+void hx711PowerDown(); // power down to save battery
+void hx711PowerUp();
 
 // FSM modes
 enum Mode {
@@ -108,6 +114,8 @@ void setup() {
   scale.begin(HX711_DAT, HX711_CLK);
   scale.set_gain(128);
   scale.set_scale(calFactor);
+  pinMode(HX711_CLK, OUTPUT);
+  digitalWrite(HX711_CLK, LOW);
 
   // Startup screen
   display.setTextSize(2);
@@ -148,6 +156,7 @@ void loop() {
   // millis based refresh
   static unsigned long lastTime = 0;
   unsigned long nowTime = millis();
+  static unsigned long refresh = refreshAwake;
 
   // sleep mode tare button detection
   static bool zeroWasPressed = false;
@@ -162,6 +171,10 @@ void loop() {
     if (!sleepArm) {
       if (!zeroPressed && !modePressed) {
         sleepArm = true;
+        display.ssd1306_command(SSD1306_DISPLAYOFF);
+        refresh = refreshSleep;
+        btStop();
+        hx711PowerDown(); 
       }
       return;
     }
@@ -170,6 +183,8 @@ void loop() {
       mode = MODE_POUR;
       display.ssd1306_command(SSD1306_DISPLAYON);
       beep(60);
+      refresh = refreshAwake;
+      hx711PowerUp();
     }
     return;
   }
@@ -271,6 +286,7 @@ void loop() {
       case MODE_POUR:
         updatePour(gFilt, running, nowTime, time, startOnce);
         drawPour(gFilt, time);
+        Serial.println(refresh);
         break;
 
       case MODE_SHOT:
@@ -284,7 +300,8 @@ void loop() {
         drawKitchen(grams, gFilt);
         break;
 
-      case MODE_SLEEP:
+      case MODE_SLEEP: // save power
+        Serial.println(refresh);
         return;  //ignore display values, keep screen off
     }
 
@@ -469,4 +486,16 @@ void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flo
   }
 
   lastState = state;
+}
+
+void hx711PowerDown() {
+  digitalWrite(HX711_CLK, HIGH);
+  delayMicroseconds(80);
+}
+
+void hx711PowerUp() {
+  digitalWrite(HX711_CLK, LOW);
+  delayMicroseconds(80);
+
+  delay(50);
 }
