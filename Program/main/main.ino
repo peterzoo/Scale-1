@@ -7,7 +7,7 @@
 #include "HX711.h"
 
 // OLED config
-constexpr int SCREEN_WIDTH  = 128;
+constexpr int SCREEN_WIDTH = 128;
 constexpr int SCREEN_HEIGHT = 64;
 constexpr int OLED_SDA = 21;
 constexpr int OLED_SCL = 22;
@@ -34,43 +34,54 @@ const float calFactor = 734;
 //    function prototypes
 // -------------------------
 
-void beep(int); // buzzer beep
-float quantize(float g); // quantize values to nearest 0.1 g
-float hysteresis(float read_g); // restrict screen updates if change is too small
-float varZeroClamp(float g); // clamp values close to 0
-void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flowStopTimer, float &time, bool &startOnce); // tare scale
+void beep(int);                                                                                                             // buzzer beep
+float quantize(float g);                                                                                                    // quantize values to nearest 0.1 g
+float hysteresis(float read_g);                                                                                             // restrict screen updates if change is too small
+float varZeroClamp(float g);                                                                                                // clamp values close to 0
+void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flowStopTimer, float &time, bool &startOnce);  // tare scale
 
 // tuning knobs
-const float emaBig = 0.4; // ema for large changes
-const float emaMed = 0.7; // ema for medium changes
-const float emaSma = 0.95; // ema for tiny changes/noise
-const float threshold = 0.08; // hysteresis threshold for movement
-const int sma = 3; // sma N value for scale.get_value
-const float zClampPos = 0.2; // positive z clamp value
-const float zClampNeg = 0.3; // negative z clamp value
-const float timerStartG = 2.0; // gram weight for timer to start
-unsigned long minFlowT = 800; // ms without flow for timer to stop
-const float minFlowG = 0.2; // gram minimum flow change for timer to stop
+const float emaBig = 0.4;       // ema for large changes
+const float emaMed = 0.7;       // ema for medium changes
+const float emaSma = 0.95;      // ema for tiny changes/noise
+const float threshold = 0.08;   // hysteresis threshold for movement
+const int sma = 3;              // sma N value for scale.get_value
+const float zClampPos = 0.2;    // positive z clamp value
+const float zClampNeg = 0.3;    // negative z clamp value
+const float timerStartG = 2.0;  // gram weight for timer to start
+unsigned long minFlowT = 800;   // ms without flow for timer to stop
+const float minFlowG = 0.2;     // gram minimum flow change for timer to stop
+const float sleepHold = 1000;   // ms to hold tare button for sleep mode
 
 // timer
-unsigned long tStart = 0; // ms since boot
-unsigned long flowStopTimer = 0; // ms tracker to stop flow
+unsigned long tStart = 0;         // ms since boot
+unsigned long flowStopTimer = 0;  // ms tracker to stop flow
 
 // millis based timing
-const unsigned long refresh = 30; // ms between executing loop
-const unsigned long debounce = 25; // ms for debounce
+const unsigned long refresh = 30;   // ms between executing loop
+const unsigned long debounce = 25;  // ms for debounce
 
-// ------------- FSM --------------
+// FSM modes
 enum Mode {
-  MODE_KITCHEN, // 0: weight only
-  MODE_SHOT,    // 1: weight + auto start-stop timer
-  MODE_POUR,    // 2: weight + cts timer
-  MODE_SLEEP,   // 4: low power UX "off"
-  MODE_COUNT    // 5: counts total number of modes for cycling
+  MODE_POUR,     // 0: weight only
+  MODE_SHOT,     // 1: weight + auto start-stop timer
+  MODE_KITCHEN,  // 2: weight + cts timer
+  MODE_SLEEP,    // 4: low power UX "off"
+  MODE_COUNT     // 5: counts total number of modes for cycling
 };
 
-static Mode mode = MODE_KITCHEN;
-// --------------------------------
+static Mode mode = MODE_POUR;  // default starting mode
+
+// FSM mode update/draw function prototypes
+
+void updatePour(float gFilt, bool &running, unsigned long nowTime, float &time, bool &startOnce, unsigned long &flowStopTimer);
+void updateShot(float gFilt, bool &running, unsigned long nowTime, float &time, bool &startOnce, unsigned long &flowStopTimer, float &prevGFilt);
+void updateKitchen(bool &running, float &time, bool &startOnce, unsigned long &flowStopTimer);
+
+void drawPour(float gFilt, float time);
+void drawShot(float gFilt, float time);
+void drawKitchen(float grams, float gFilt);
+
 
 void setup() {
   Serial.begin(115200);
@@ -120,7 +131,6 @@ void setup() {
   display.println("Ready.");
   display.display();
   delay(300);
-  
 }
 
 void loop() {
@@ -128,12 +138,12 @@ void loop() {
   long val = 0;
   float grams = 0.0f;
   static float gFilt = 0;
-  static float prevGFilt = 0; // timer auto-stop derivative
+  static float prevGFilt = 0;  // timer auto-stop helper
 
   // timer variables
-  static bool running = false; // state of timer, running or not
+  static bool running = false;  // state of timer, running or not
   static float time = 0;
-  static bool startOnce = true; // timer can only start once, in beginning
+  static bool startOnce = true;  // timer can only start once, in beginning
 
   // millis based refresh
   static unsigned long lastTime = 0;
@@ -144,8 +154,8 @@ void loop() {
   static unsigned long zeroPressTime = 0;
   static bool asleep = false;
 
-  bool zeroPressed = (digitalRead (zeroButtonPin) == LOW); // pressed = HIGH = true, default = not pressed
-  bool modePressed = (digitalRead (modeButtonPin) == LOW);
+  bool zeroPressed = (digitalRead(zeroButtonPin) == LOW);  // pressed = HIGH = true, default = not pressed
+  bool modePressed = (digitalRead(modeButtonPin) == LOW);
   static bool sleepArm = false;
 
   if (mode == MODE_SLEEP) {
@@ -157,7 +167,7 @@ void loop() {
     }
 
     if (zeroPressed || modePressed) {
-      mode = MODE_KITCHEN;
+      mode = MODE_POUR;
       display.ssd1306_command(SSD1306_DISPLAYON);
       beep(60);
     }
@@ -173,11 +183,10 @@ void loop() {
 
   // detect how long zero was pressed
   if (zeroPressed && zeroWasPressed && !asleep) {
-    if(nowTime - zeroPressTime >= 2000) {
+    if (nowTime - zeroPressTime >= sleepHold) {
       asleep = true;
       mode = MODE_SLEEP;
       display.ssd1306_command(SSD1306_DISPLAYOFF);
-      beep (80);
       sleepArm = false;
     }
   }
@@ -191,20 +200,20 @@ void loop() {
 
   static unsigned long lastModePress = 0;
   if (lastModeButton == false && modePressed == true) {
-    if (nowTime - lastModePress > debounce) { // debounce
+    if (nowTime - lastModePress > debounce) {  // debounce
       lastModePress = nowTime;
 
-    // cycle modes
-      mode = (Mode)((mode+1) % MODE_COUNT);
-      
-      if (mode == MODE_SLEEP) mode = (Mode)((mode + 1) % MODE_COUNT);  // skip sleep
+      // cycle modes
+      mode = (Mode)((mode + 1) % MODE_COUNT);
+
+      if (mode == MODE_SLEEP) mode = MODE_POUR;  // skip sleep
 
       beep(100);
     }
   }
 
   lastModeButton = modePressed;
-  
+
   // zero on mode change
   static Mode prevMode = MODE_COUNT;
   if (mode != prevMode) {
@@ -220,11 +229,13 @@ void loop() {
     prevMode = mode;
   }
 
-  //--------------- FSM end-------------
-
+  // millis based refresh rate based on refresh variable
   if (nowTime - lastTime >= refresh) {
-      lastTime = nowTime;
-    
+    lastTime = nowTime;
+
+    // Update OLED
+    display.clearDisplay();
+
     // millis based zero function
     tare(nowTime, gFilt, running, flowStopTimer, time, startOnce);
 
@@ -238,130 +249,204 @@ void loop() {
     // adaptive EMA
     float err = fabsf(grams - gFilt);
 
-    if(err > 1.0f) {
-      gFilt = grams; // snap immediately for large change
-    }
-    else {
+    if (err > 1.0f) {
+      gFilt = grams;  // snap immediately for large change
+    } else {
       float ema = 0;
-      if (err > 0.3f)         {ema = emaBig;}  // moving fast
-      else if (err > 0.1f)   {ema = emaMed;}  // moving medium
-      else                    {ema = emaSma;} // still/no change
+      if (err > 0.3f) { ema = emaBig; }  // moving fast
+      else if (err > 0.1f) {
+        ema = emaMed;
+      }                       // moving medium
+      else { ema = emaSma; }  // still/no change
 
       gFilt = ema * gFilt + (1.0f - ema) * grams;
     }
-    
-    gFilt = hysteresis(gFilt); // Controls when UI can change to ignore noise
-    gFilt = varZeroClamp (gFilt);
-    gFilt = quantize(gFilt); // quantize to fixed steps
-    float oz = gFilt / 28.3495;
+
+    gFilt = hysteresis(gFilt);    // controls when UI can change to ignore noise
+    gFilt = varZeroClamp(gFilt);  // clamps to zero when close, UX stability
+    gFilt = quantize(gFilt);      // quantize to fixed steps for 0.1 g accuracy
 
     // fsm non-blocking mode switching
     switch (mode) {
-      case MODE_KITCHEN:
-        // disable timer, weight only
-        running = false;
-        time = 0.0f;
-        startOnce = true;
-        flowStopTimer = 0;
+      case MODE_POUR:
+        updatePour(gFilt, running, nowTime, time, startOnce, flowStopTimer);
+        drawPour(gFilt, time);
         break;
 
       case MODE_SHOT:
         // auto-stop shot timer enabled
-        if (running == false && startOnce == true && gFilt > timerStartG)
-        {
-          running = true;
-          tStart = nowTime;
-          time = 0.0f;
-          startOnce = false;
-          flowStopTimer = 0;
-        }
-
-        // auto stop checker
-        if (running == true) {
-          float deltaG = gFilt - prevGFilt; // change in weight
-
-          if (fabsf(deltaG) < minFlowG) { // flow stopped, weight barely changing
-            if (flowStopTimer == 0) {
-              flowStopTimer = nowTime; // start counting flow stopped time
-            } else if (nowTime - flowStopTimer > minFlowT){ // if flow stop timer is running
-              running = false;
-              startOnce = false;
-              flowStopTimer = 0;
-            }
-          } else {
-              flowStopTimer = 0;
-          }
-        }
-
-        // display time calculator
-        if (running == true) {
-          time = (nowTime - tStart)/1000.0f;
-        }
-      
-        // re-arm timer if cup is removed
-        if (!running && gFilt < 1.0f) {
-          startOnce = true;
-        }
+        updateShot(gFilt, running, nowTime, time, startOnce, flowStopTimer, prevGFilt);
+        drawShot(gFilt, time);
         break;
 
-      case MODE_POUR:
-        // auto-stop shot timer enabled
-        if (running == false && startOnce == true && gFilt > timerStartG)
-        {
-          running = true;
-          tStart = nowTime;
-          time = 0.0f;
-          startOnce = false;
-          flowStopTimer = 0;
-        }
-
-        if (running == true) {
-        time = (nowTime - tStart)/1000.0f;
-        }
+      case MODE_KITCHEN:
+        updateKitchen(running, time, startOnce, flowStopTimer);
+        drawKitchen(grams, gFilt);
         break;
 
       case MODE_SLEEP:
         display.clearDisplay();
         display.display();
-        return; //ignore display values, keep screen off
+        return;  //ignore display values, keep screen off
     }
 
     prevGFilt = gFilt;
-    // Update OLED
-    display.clearDisplay();
 
-    // display mode
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.print("Mode:");
-    if (mode == MODE_KITCHEN) display.print("kitchen");
-    else if (mode == MODE_SHOT) display.print("espresso shot");
-    else if(mode == MODE_POUR) display.print ("pourover");
+    // // display mode
+    // display.setTextSize(1);
+    // display.setCursor(0, 0);
+    // display.print("Mode:");
+    // if (mode == MODE_KITCHEN) display.print("kitchen");
+    // else if (mode == MODE_SHOT) display.print("espresso shot");
+    // else if (mode == MODE_POUR) display.print("pourover");
 
-    // raw value
-    display.setTextSize(1);
-    display.setCursor(0, 16);
-    display.print(val);
+    // // raw value
+    // display.setTextSize(2);
+    // display.setCursor(0, 16);
+    // if (mode == MODE_KITCHEN) display.print(pounds, 2);
+    // else display.print(val);
 
-    // raw grams
-    display.setTextSize(2);
-    display.setCursor(55, 16);
-    display.print(grams,2);
+    // // raw grams
+    // display.setTextSize(2);
+    // display.setCursor(55, 16);
+    // display.print(grams, 2);
 
-    // filtered grams
-    display.setTextSize(2);
-    display.setCursor(0, 40);
-    display.print(gFilt,1);
+    // // filtered grams
+    // display.setTextSize(2);
+    // display.setCursor(0, 40);
+    // display.print(gFilt, 1);
 
-    // time
-    display.setTextSize(2);
-    display.setCursor(55,40);
-    if (mode == MODE_SHOT) display.print(time,1);
-    if (mode == MODE_KITCHEN) display.print(oz, 1);
-    if (mode == MODE_POUR) display.print(time,1);
+    // // time
+    // display.setTextSize(2);
+    // display.setCursor(55, 40);
+    // if (mode == MODE_SHOT) display.print(time, 1);
+    // if (mode == MODE_KITCHEN) display.print(oz, 1);
+    // if (mode == MODE_POUR) display.print(time, 1);
     display.display();
   }
 }
+
+// -------------- FSM mode functions ------------------
+void updatePour(float gFilt, bool &running, unsigned long nowTime, float &time, bool &startOnce, unsigned long &flowStopTimer) {
+  if (running == false && startOnce == true && gFilt > timerStartG) {
+    running = true;
+    tStart = nowTime;
+    time = 0.0f;
+    startOnce = false;
+    flowStopTimer = 0;
+  }
+
+  if (running == true) {
+    time = (nowTime - tStart) / 1000.0f;
+  }
+}
+
+void updateShot(float gFilt, bool &running, unsigned long nowTime, float &time, bool &startOnce, unsigned long &flowStopTimer, float &prevGFilt) {
+  if (running == false && startOnce == true && gFilt > timerStartG) {
+    running = true;
+    tStart = nowTime;
+    time = 0.0f;
+    startOnce = false;
+    flowStopTimer = 0;
+  }
+
+  // auto stop checker
+  if (running == true) {
+    float deltaG = gFilt - prevGFilt;  // change in weight
+
+    if (fabsf(deltaG) < minFlowG) {  // flow stopped, weight barely changing
+      if (flowStopTimer == 0) {
+        flowStopTimer = nowTime;                        // start counting flow stopped time
+      } else if (nowTime - flowStopTimer > minFlowT) {  // if flow stop timer is running
+        running = false;
+        startOnce = false;
+        flowStopTimer = 0;
+      }
+    } else {
+      flowStopTimer = 0;
+    }
+  }
+
+  // display time calculator
+  if (running == true) {
+    time = (nowTime - tStart) / 1000.0f;
+  }
+
+  // re-arm timer if cup is removed
+  if (!running && gFilt < 1.0f) {
+    startOnce = true;
+  }
+}
+
+void updateKitchen(bool &running, float &time, bool &startOnce, unsigned long &flowStopTimer) {
+  // disable timer, weight only
+  running = false;
+  time = 0.0f;
+  startOnce = true;
+  flowStopTimer = 0;
+}
+
+void drawPour(float gFilt, float time) {
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("mode: pourover");
+
+    // filtered grams
+    display.setTextSize(2);
+    display.setCursor(0, 16);
+    display.print(gFilt, 1);
+    display.println(" g");
+
+    // time
+    display.setTextSize(2);
+    display.setCursor(0, 40);
+    display.print(time, 1);
+    display.println(" s");
+}
+
+void drawShot(float gFilt, float time) {
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("mode: shot");
+
+    // filtered grams
+    display.setTextSize(2);
+    display.setCursor(0, 16);
+    display.print(gFilt, 1);
+    display.println(" g");
+
+    // time
+    display.setTextSize(2);
+    display.setCursor(0, 40);
+    display.print(time, 1);
+    display.println(" s");
+}
+
+void drawKitchen(float grams, float gFilt) {
+  float oz = gFilt / 28.3495;
+  float pounds = gFilt / 453.592;
+
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("mode: kitchen");
+
+  display.setTextSize(2);
+  display.setCursor(0, 16);
+  display.print(pounds, 2);
+
+  display.setTextSize(2);
+  display.setCursor(55, 16);
+  display.print(grams, 2);
+
+  display.setTextSize(2);
+  display.setCursor(0, 40);
+  display.print(gFilt, 1);
+
+  display.setTextSize(2);
+  display.setCursor(55, 40);
+  display.print(oz, 1);
+}
+
 
 // ---------------
 //    Functions
