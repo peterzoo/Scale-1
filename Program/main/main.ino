@@ -55,7 +55,7 @@ unsigned long flowStopTimer = 0;  // ms tracker to stop flow
 
 // millis based timing
 const unsigned long refreshAwake = 30; // ms between executing loop
-const unsigned long refreshSleep = 200; // longer ms between executing loop while asleep to save power
+const unsigned long refreshSleep = 300; // longer ms between executing loop while asleep to save power
 const unsigned long debounce = 25;  // ms for debounce
 
 // function prototypes
@@ -166,7 +166,7 @@ void loop() {
   bool zeroPressed = (digitalRead(zeroButtonPin) == LOW);  // pressed = HIGH = true, default = not pressed
   bool modePressed = (digitalRead(modeButtonPin) == LOW);
   static bool sleepArm = false;
-
+      Serial.println(refresh);
   if (mode == MODE_SLEEP) {
     if (!sleepArm) {
       if (!zeroPressed && !modePressed) {
@@ -286,7 +286,6 @@ void loop() {
       case MODE_POUR:
         updatePour(gFilt, running, nowTime, time, startOnce);
         drawPour(gFilt, time);
-        Serial.println(refresh);
         break;
 
       case MODE_SHOT:
@@ -301,7 +300,6 @@ void loop() {
         break;
 
       case MODE_SLEEP: // save power
-        Serial.println(refresh);
         return;  //ignore display values, keep screen off
     }
 
