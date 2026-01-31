@@ -85,8 +85,8 @@ void updatePour(float gFilt, bool &running, unsigned long nowTime, float &time, 
 void updateShot(float gFilt, bool &running, unsigned long nowTime, float &time, bool &startOnce, unsigned long &flowStopTimer, float &prevGFilt);
 void updateKitchen(bool &running, float &time, bool &startOnce, unsigned long &flowStopTimer);
 
-void drawPour(float gFilt, float time);
-void drawShot(float gFilt, float time);
+void drawPour(float gFilt, int minutes, int seconds, int milliseconds);
+void drawShot(float gFilt, int minutes, int seconds, int milliseconds);
 void drawKitchen(float grams, float gFilt);
 
 
@@ -153,8 +153,10 @@ void loop() {
   static bool running = false;  // state of timer, running or not
   static float time = 0;
   static bool startOnce = true;  // timer can only start once, in beginning
-  static unsigned float seconds = 0;
+
   static unsigned int minutes = 0;
+  static unsigned int seconds = 0;
+  static unsigned int milliseconds = 0;
 
   // millis based refresh
   static unsigned long lastTime = 0;
@@ -290,13 +292,15 @@ void loop() {
     switch (mode) {
       case MODE_POUR:
         updatePour(gFilt, running, nowTime, time, startOnce);
-        drawPour(gFilt, time);
+        convertTime(time, minutes, seconds, milliseconds);
+        drawPour(gFilt, minutes, seconds, milliseconds);
         break;
 
       case MODE_SHOT:
         // auto-stop shot timer enabled
         updateShot(gFilt, running, nowTime, time, startOnce, flowStopTimer, prevGFilt);
-        drawShot(gFilt, time);
+        convertTime(time, minutes, seconds, milliseconds);
+        drawShot(gFilt, minutes, seconds, milliseconds);
         break;
 
       case MODE_KITCHEN:
@@ -372,7 +376,7 @@ void updateKitchen(bool &running, float &time, bool &startOnce, unsigned long &f
   flowStopTimer = 0;
 }
 
-void drawPour(float gFilt, float time) {
+void drawPour(float gFilt, int minutes, int seconds, int milliseconds) {
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print("mode: pourover");
@@ -386,11 +390,23 @@ void drawPour(float gFilt, float time) {
   // time
   display.setTextSize(2);
   display.setCursor(0, 40);
-  display.print(time, 1);
-  display.println(" s");
+  display.print(minutes);
+  display.print(":");
+  if (seconds < 10) {
+    display.print("0");
+  }
+  display.print(seconds);
+  display.print(".");
+  display.print(milliseconds);
+
+  display.setTextSize(1);
+  display.setCursor(5,55);
+  display.print("m");
+  display.setCursor(41,55);
+  display.print("s");
 }
 
-void drawShot(float gFilt, float time) {
+void drawShot(float gFilt, int minutes, int seconds, int milliseconds) {
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print("mode: shot");
@@ -404,8 +420,20 @@ void drawShot(float gFilt, float time) {
   // time
   display.setTextSize(2);
   display.setCursor(0, 40);
-  display.print(time, 1);
-  display.println(" s");
+  display.print(minutes);
+  display.print(":");
+  if (seconds < 10) {
+    display.print("0");
+  }
+  display.print(seconds);
+  display.print(".");
+  display.print(milliseconds);
+
+  display.setTextSize(1);
+  display.setCursor(5,55);
+  display.print("m");
+  display.setCursor(41,55);
+  display.print("s");
 }
 
 void drawKitchen(float grams, float gFilt) {
