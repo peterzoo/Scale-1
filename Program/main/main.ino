@@ -400,9 +400,9 @@ void drawPour(float gFilt, int minutes, int seconds, int milliseconds) {
   display.print(milliseconds);
 
   display.setTextSize(1);
-  display.setCursor(5,55);
+  display.setCursor(5,57);
   display.print("m");
-  display.setCursor(41,55);
+  display.setCursor(41,57);
   display.print("s");
 }
 
@@ -430,9 +430,9 @@ void drawShot(float gFilt, int minutes, int seconds, int milliseconds) {
   display.print(milliseconds);
 
   display.setTextSize(1);
-  display.setCursor(5,55);
+  display.setCursor(5,57);
   display.print("m");
-  display.setCursor(41,55);
+  display.setCursor(41,57);
   display.print("s");
 }
 
@@ -444,21 +444,27 @@ void drawKitchen(float grams, float gFilt) {
   display.setCursor(0, 0);
   display.print("mode: kitchen");
 
+  // pounds
   display.setTextSize(2);
   display.setCursor(0, 16);
-  display.print(pounds, 2);
+  display.print(gFilt, 1);
+  display.print(" g");
 
-  display.setTextSize(2);
-  display.setCursor(55, 16);
-  display.print(grams, 2);
-
+  // pounds
   display.setTextSize(2);
   display.setCursor(0, 40);
-  display.print(gFilt, 1);
+  display.print(pounds, 2);
 
+  // oz
   display.setTextSize(2);
-  display.setCursor(55, 40);
+  display.setCursor(65, 40);
   display.print(oz, 1);
+
+  display.setTextSize(1);
+  display.setCursor(0,57);
+  display.print("lbs");
+  display.setCursor(65,57);
+  display.print("oz");
 }
 
 
