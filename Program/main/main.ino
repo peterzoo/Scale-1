@@ -71,7 +71,7 @@ void tare(unsigned long nowTime, float &gFilt, bool &running, unsigned long &flo
 void hx711PowerDown();                                                                                                      // power down to save battery
 void hx711PowerUp();
 void convertTime(unsigned long time);  // timer display for minutes, seconds
-float computeFlowrate(float gFilt, float &prevGFilt, unsigned long nowTime);
+float computeFlowrate(float gFilt, float &prevGFlow, unsigned long nowTime);
 
 // FSM modes
 enum Mode {
@@ -170,6 +170,7 @@ void loop() {
 
   // flowrate
   static float flowrate = 0;
+  static float prevGFlow = 0; // seperate prev grams for flowrate calc
 
   // sleep mode tare button detection
   static bool zeroWasPressed = false;
@@ -296,7 +297,7 @@ void loop() {
     gFilt = varZeroClamp(gFilt);  // clamps to zero when close, UX stability
     gFilt = quantize(gFilt);      // quantize to fixed steps for 0.1 g accuracy
 
-    flowrate = computeFlowrate(gFilt, prevGFilt, nowTime);
+    flowrate = computeFlowrate(gFilt, prevGFlow, nowTime);
 
     // fsm non-blocking mode switching
     switch (mode) {
@@ -323,8 +324,7 @@ void loop() {
       case MODE_SLEEP:  // save power
         return;         //ignore display values, keep screen off
     }
-
-    prevGFilt = gFilt;
+    prevGFlow = gFilt;
 
     display.display();
   }
@@ -367,11 +367,12 @@ void updateShot(float gFilt, bool &running, unsigned long nowTime, float &time, 
     } else {
       flowStopTimer = 0;
     }
+    prevGFilt = gFilt;
   }
 
   // display time calculator
   if (running == true) {
-    time = (nowTime - tStart) / 1000.0f;
+    time = nowTime - tStart;
   }
 
   // re-arm timer if cup is removed
@@ -555,13 +556,13 @@ void convertTime(unsigned long time, unsigned int &minutes, unsigned int &second
   minutes = time / 60000;
 }
 
-float computeFlowrate(float gFilt, float &prevGFilt, unsigned long nowTime) {
+float computeFlowrate(float gFilt, float &prevGFlow, unsigned long nowTime) {
   static unsigned long prevTime = 0;
   static bool inited = false;
 
   // init on first call
   if (!inited) {
-    prevGFilt = gFilt;
+    prevGFlow = gFilt;
     prevTime = nowTime;
     inited = true;
     return 0.0f;
@@ -570,7 +571,7 @@ float computeFlowrate(float gFilt, float &prevGFilt, unsigned long nowTime) {
   unsigned long dtMs = nowTime - prevTime;
   if (dtMs == 0) return 0.0f;
 
-  float dg = gFilt - prevGFilt;
+  float dg = gFilt - prevGFlow;
 
   // grams per second
   float flow = dg / (dtMs / 1000.0f);
@@ -579,7 +580,7 @@ float computeFlowrate(float gFilt, float &prevGFilt, unsigned long nowTime) {
   if (flow < 0.0f) flow = 0.0f;
 
   // update history
-  prevGFilt = gFilt;
+  prevGFlow = gFilt;
   prevTime = nowTime;
 
   return flow;
