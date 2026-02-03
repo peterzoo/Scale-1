@@ -142,7 +142,7 @@ void setup() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("Taring...");
+  display.println("taring...");
   display.display();
 
   scale.tare();
@@ -191,58 +191,11 @@ void loop() {
   bool modePressed = (digitalRead(modeButtonPin) == LOW);
   static bool sleepArm = false;
 
+  static Mode prevMode = MODE_COUNT;
+
   Serial.println(refresh);  // debugging
 
-  // -------------- FSM mode swticher --------------
-  static bool lastModeButton = false;
-
-  static unsigned long lastModePress = 0;
-  if (lastModeButton == false && modePressed == true) {
-    if (nowTime - lastModePress > debounce) {  // debounce
-      lastModePress = nowTime;
-
-      // cycle modes
-      mode = (Mode)((mode + 1) % MODE_COUNT);
-
-      if (mode == MODE_SLEEP) mode = MODE_POUR;  // skip sleep
-
-      beep(100);
-    }
-  }
-
-  lastModeButton = modePressed;
-
-  // zero on mode change
-  static Mode prevMode = MODE_COUNT;
-  if (mode != prevMode) {
-    // mode just changed
-    scale.tare();
-
-    gFilt = 0.0f;
-    running = false;
-    time = 0.0f;
-    startOnce = true;
-    flowStopTimer = 0;
-
-    lastPressMs = nowTime;
-
-    prevMode = mode;
-  }
-  
   // sleep logic
-  if (mode != prevMode) {
-    if (mode == MODE_SLEEP) {
-      display.clearDisplay();
-      display.setTextSize(2);
-      display.setCursor(0, 18);
-      display.print("sleeping");
-      display.display();
-
-      beep(50);
-      delay(250);
-      display.ssd1306_command(SSD1306_DISPLAYOFF);
-    }
-  }
 
   if (mode == MODE_SLEEP) {
     if (!sleepArm) {
@@ -276,8 +229,22 @@ void loop() {
   // detect how long zero was pressed
   if (zeroPressed && zeroWasPressed && !asleep) {
     if (nowTime - zeroPressTime >= sleepHold) {
-      asleep = true;
       mode = MODE_SLEEP;
+      if (mode != prevMode) {
+        if (mode == MODE_SLEEP) {
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 0);
+          display.print("sleep");
+          display.display();
+
+          beep(50);
+          delay(500);
+          display.ssd1306_command(SSD1306_DISPLAYOFF);
+        }
+      }
+      asleep = true;
+
       display.ssd1306_command(SSD1306_DISPLAYOFF);
       sleepArm = false;
     }
@@ -290,10 +257,58 @@ void loop() {
   if (mode != MODE_SLEEP) {
     if (nowTime - lastPressMs >= sleepMs) {
       mode = MODE_SLEEP;
+      if (mode != prevMode) {
+        if (mode == MODE_SLEEP) {
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 0);
+          display.print("sleep");
+          display.display();
+
+          beep(50);
+          delay(500);
+          display.ssd1306_command(SSD1306_DISPLAYOFF);
+        }
+      }
       sleepArm = false;  // your existing guard
     }
   }
 
+  // -------------- FSM mode swticher --------------
+  static bool lastModeButton = false;
+
+  static unsigned long lastModePress = 0;
+  if (lastModeButton == false && modePressed == true) {
+    if (nowTime - lastModePress > debounce) {  // debounce
+      lastModePress = nowTime;
+
+      // cycle modes
+      mode = (Mode)((mode + 1) % MODE_COUNT);
+
+      if (mode == MODE_SLEEP) mode = MODE_POUR;  // skip sleep
+
+      beep(100);
+    }
+  }
+
+  lastModeButton = modePressed;
+
+  // zero on mode change
+
+  if (mode != prevMode) {
+    // mode just changed
+    scale.tare();
+
+    gFilt = 0.0f;
+    running = false;
+    time = 0.0f;
+    startOnce = true;
+    flowStopTimer = 0;
+
+    lastPressMs = nowTime;
+
+    prevMode = mode;
+  }
 
   // millis based refresh rate based on refresh variable
   if (nowTime - lastTime >= refresh) {
