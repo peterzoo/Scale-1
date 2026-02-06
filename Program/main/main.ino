@@ -66,7 +66,7 @@ const float shotFlow = 25;
 const float pourFlow = 50;
 
 // auto-sleep when no button is pressed for time
-const unsigned long sleepMs = 10UL * 60 UL * 1000UL;  // 10 minutes; 10min*60s/min*1000ms/s
+const unsigned long sleepMs = 10UL * 60UL * 1000UL;  // 10 minutes; 10min*60s/min*1000ms/s
 static unsigned long lastPressMs = 0;
 
 const float beepGrams = 200;
